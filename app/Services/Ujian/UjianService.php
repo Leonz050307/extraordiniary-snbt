@@ -3,6 +3,7 @@
 namespace ShellreanDev\Services\Ujian;
 
 use App\Models\CacheConstant;
+use App\Models\SnbtSubtest;
 use App\Models\SoalConstant;
 use App\Models\UjianConstant;
 use Illuminate\Database\Eloquent\Model;
@@ -13,6 +14,8 @@ use Carbon\Carbon;
 use App\Banksoal;
 use App\Peserta;
 use App\JawabanPeserta;
+use App\Soal;
+use App\SiswaUjian;
 
 use Illuminate\Support\Str;
 use Illuminate\Support\Arr;
@@ -542,7 +545,10 @@ final class UjianService extends AbstractService
                 'peserta_id'    => $peserta_id,
             ])->where('answered', false)->count();
 
-            $hasil = $hasil_pg+$hasil_listening+$hasil_mpg+$hasil_isiang_singkat+$hasil_menjodohkan+$hasil_mengurutkan+$hasil_benar_salah;
+            $subtestScores = $this->calculateSnbtSubtestScores($banksoal_id, $jadwal_id, $peserta_id);
+            $hasil = round(array_reduce($subtestScores, function ($carry, $item) {
+                return $carry + ($item['score'] ?? 0);
+            }, 0), 2);
 
             DB::table('hasil_ujians')->insert([
                 'id'                            => Str::uuid()->toString(),
@@ -566,6 +572,7 @@ final class UjianService extends AbstractService
                 'jumlah_salah_benar_salah'      => $jumlah_benar_salah_salah,
                 'tidak_diisi'                   => $null,
                 'hasil'                         => $hasil,
+                'subtest_scores'                => json_encode($subtestScores),
                 'point_esay'                    => 0,
                 'point_setuju_tidak'            => 0,
                 'created_at'                    => now(),
@@ -577,6 +584,79 @@ final class UjianService extends AbstractService
         }
 
         return true;
+    }
+
+    /**
+     * Calculate SNBT subtest scores for a participant.
+     */
+    private function calculateSnbtSubtestScores(string $banksoalId, string $jadwalId, string $pesertaId): array
+    {
+        $definitions = SnbtSubtest::all();
+        $subtestsByQuestion = [];
+
+        $soalSubtests = Soal::where('banksoal_id', $banksoalId)
+            ->get(['id', 'subtest']);
+
+        foreach ($soalSubtests as $soal) {
+            $key = $soal->subtest;
+            if (!SnbtSubtest::isValid($key)) {
+                $key = SnbtSubtest::PENALARAN_UMUM;
+            }
+            $subtestsByQuestion[$key][] = $soal->id;
+        }
+
+        $totalParticipants = SiswaUjian::where('jadwal_id', $jadwalId)->count();
+        if ($totalParticipants === 0) {
+            $totalParticipants = JawabanPeserta::where('jadwal_id', $jadwalId)
+                ->distinct('peserta_id')
+                ->count('peserta_id');
+        }
+        $totalParticipants = max(1, $totalParticipants);
+
+        $pesertaAnswers = JawabanPeserta::where('jadwal_id', $jadwalId)
+            ->where('peserta_id', $pesertaId)
+            ->get(['soal_id', 'iscorrect']);
+
+        $correctAnswersByQuestion = DB::table('jawaban_pesertas')
+            ->select('soal_id', DB::raw('SUM(CASE WHEN iscorrect = 1 THEN 1 ELSE 0 END) as correct_count'))
+            ->where('jadwal_id', $jadwalId)
+            ->groupBy('soal_id')
+            ->pluck('correct_count', 'soal_id');
+
+        $scores = [];
+
+        foreach ($definitions as $key => $meta) {
+            $questionIds = $subtestsByQuestion[$key] ?? [];
+            $questionCount = count($questionIds);
+            $basePoint = $questionCount > 0 ? SnbtSubtest::MAX_SCORE / $questionCount : 0;
+            $score = 0.0;
+            $correctCount = 0;
+
+            foreach ($questionIds as $soalId) {
+                $answer = $pesertaAnswers->firstWhere('soal_id', $soalId);
+                if (!$answer || intval($answer->iscorrect) !== 1) {
+                    continue;
+                }
+
+                $correctCount++;
+                $correctForQuestion = $correctAnswersByQuestion[$soalId] ?? 0;
+                $difficulty = 1 - ($correctForQuestion / $totalParticipants);
+                if ($difficulty < 0) {
+                    $difficulty = 0;
+                }
+
+                $score += $basePoint * $difficulty;
+            }
+
+            $scores[$key] = [
+                'label' => $meta['label'],
+                'score' => min(SnbtSubtest::MAX_SCORE, max(0, round($score, 2))),
+                'question_count' => $questionCount,
+                'correct_count' => $correctCount,
+            ];
+        }
+
+        return $scores;
     }
 
     /**

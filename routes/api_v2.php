@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Route;
  */
 Route::namespace('Api\v2')->group(function() {
 
+    Route::post('register','PesertaLoginController@register');
     Route::post('logedin','PesertaLoginController@login');
     Route::get('setting', 'PesertaLoginController@getSetting');
 
@@ -24,6 +25,7 @@ Route::namespace('Api\v2')->group(function() {
         Route::get('ujians/filled', 'UjianAktifController@getJawabanPeserta');
         Route::post('ujian/hasils', 'UjianAktifController@getHasilUjian');
         Route::post('ujian','UjianController@store');
+        Route::get('ujian/{jadwal}/review', 'UjianAktifController@review');
         Route::post('ujian/ragu-ragu', 'UjianController@setRagu');
         Route::get('ujian/selesai', 'UjianController@selesai');
         Route::post('ujians/leave-counter', 'UjianAktifController@leaveCounter');

@@ -28,7 +28,8 @@ class HasilUjian extends Model
      * @var [type]
      */
     protected $casts = [
-        'jawaban_peserta' => 'array'
+        'jawaban_peserta' => 'array',
+        'subtest_scores' => 'array',
     ];
 
     /**

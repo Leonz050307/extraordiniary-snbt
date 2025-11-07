@@ -2,7 +2,9 @@
 namespace App\Http\Controllers\Api\v2;
 
 use App\Http\Controllers\Controller;
+use App\JawabanPeserta;
 use App\Models\CacheConstant;
+use App\Models\SnbtSubtest;
 use App\Models\UjianConstant;
 use App\Services\Setting\SettingTokenService;
 use App\Services\Ujian\BenarSalahService;
@@ -527,18 +529,99 @@ class UjianAktifController extends Controller
                 'jadwals.alias',
                 'hasil_ujians.point_esay',
                 'hasil_ujians.point_setuju_tidak',
-                'hasil_ujians.hasil as result'
+                'hasil_ujians.hasil as result',
+                'hasil_ujians.subtest_scores'
             ])
             ->get();
 
         $hasil = $hasil->map(function($item) {
+            $subtests = [];
+            $totalSubtestScore = 0;
+            if (!empty($item->subtest_scores)) {
+                $decoded = json_decode($item->subtest_scores, true);
+                if (is_array($decoded)) {
+                    foreach ($decoded as $key => $value) {
+                        if (!is_array($value)) {
+                            continue;
+                        }
+                        $totalSubtestScore += $value['score'] ?? 0;
+                        $subtests[] = array_merge(['key' => $key], $value);
+                    }
+                }
+            }
+
             return [
                 'alias' => $item->alias,
-                'hasil' => $item->point_esay + $item->point_setuju_tidak + $item->result
+                'hasil' => $item->point_esay + $item->point_setuju_tidak + $item->result,
+                'subtests' => $subtests,
+                'total_subtest_score' => round($totalSubtestScore, 2),
             ];
         });
 
         return SendResponse::acceptData($hasil);
+    }
+
+    /**
+     * @Route(path="api/v2/ujian/{jadwal}/review", methods={"GET"})
+     *
+     * Review hasil ujian dengan menampilkan jawaban salah dan kunci.
+     */
+    public function review(string $jadwalId)
+    {
+        $peserta = request()->get('peserta-auth');
+
+        $hasil = DB::table('hasil_ujians')
+            ->where('jadwal_id', $jadwalId)
+            ->where('peserta_id', $peserta->id)
+            ->first();
+
+        if (!$hasil) {
+            return SendResponse::badRequest('Hasil ujian belum tersedia untuk jadwal ini.');
+        }
+
+        $jawaban = JawabanPeserta::with(['soal.jawabans' => function ($query) {
+                $query->orderBy('created_at');
+            }])
+            ->where('jadwal_id', $jadwalId)
+            ->where('peserta_id', $peserta->id)
+            ->get();
+
+        $subtests = SnbtSubtest::all();
+
+        $data = $jawaban->map(function (JawabanPeserta $item) use ($peserta, $subtests) {
+            $correctOptions = $item->soal->jawabans->filter(function ($jawaban) {
+                return (string)$jawaban->correct === '1';
+            })->map(function ($jawaban) {
+                return [
+                    'id' => $jawaban->id,
+                    'text' => $jawaban->text_jawaban,
+                    'label' => $jawaban->label_mark ?? null,
+                ];
+            })->values();
+
+            $subtestKey = $item->soal->subtest;
+            if (!SnbtSubtest::isValid($subtestKey)) {
+                $subtestKey = SnbtSubtest::PENALARAN_UMUM;
+            }
+
+            return [
+                'soal_id' => $item->soal_id,
+                'pertanyaan' => $item->soal->pertanyaan,
+                'subtest' => $subtestKey,
+                'subtest_label' => $subtests[$subtestKey]['label'] ?? $subtests[SnbtSubtest::PENALARAN_UMUM]['label'],
+                'tipe_soal' => intval($item->soal->tipe_soal),
+                'is_correct' => (bool)$item->iscorrect,
+                'student_answer' => $this->formatStudentAnswer($item),
+                'correct_answers' => $correctOptions,
+                'explanation' => $peserta->is_premium ? $item->soal->analys : null,
+                'can_view_explanation' => (bool)$peserta->is_premium,
+            ];
+        })->values();
+
+        return SendResponse::acceptData([
+            'is_premium' => (bool)$peserta->is_premium,
+            'answers' => $data,
+        ]);
     }
 
     /**
@@ -613,5 +696,31 @@ class UjianAktifController extends Controller
                 'block_reason' => $request->reason
             ]);
         }
+    }
+
+    private function formatStudentAnswer(JawabanPeserta $jawaban): array
+    {
+        $selectedOption = null;
+        if ($jawaban->jawab) {
+            $option = $jawaban->soal->jawabans->firstWhere('id', $jawaban->jawab);
+            if ($option) {
+                $selectedOption = [
+                    'id' => $option->id,
+                    'text' => $option->text_jawaban,
+                    'label' => $option->label_mark ?? null,
+                ];
+            }
+        }
+
+        return [
+            'jawab' => $jawaban->jawab,
+            'selected_option' => $selectedOption,
+            'jawab_complex' => $jawaban->jawab_complex,
+            'esay' => $jawaban->esay,
+            'menjodohkan' => $jawaban->menjodohkan ? json_decode($jawaban->menjodohkan, true) : null,
+            'mengurutkan' => $jawaban->mengurutkan ? json_decode($jawaban->mengurutkan, true) : null,
+            'benar_salah' => $jawaban->benar_salah ? json_decode($jawaban->benar_salah, true) : null,
+            'setuju_tidak' => $jawaban->setuju_tidak ? json_decode($jawaban->setuju_tidak, true) : null,
+        ];
     }
 }

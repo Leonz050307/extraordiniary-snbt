@@ -21,6 +21,54 @@ use Browser;
 class PesertaLoginController extends Controller
 {
     /**
+     * @Route(path="api/v2/register", methods={"POST"})
+     *
+     * Register new peserta into system.
+     */
+    public function register(Request $request)
+    {
+        $request->validate([
+            'nama' => 'required|string',
+            'no_ujian' => 'required|string|unique:pesertas,no_ujian',
+            'password' => 'required|string',
+            'jurusan_id' => 'required|exists:jurusans,id',
+            'agama_id' => 'required|exists:agamas,id',
+            'sesi' => 'required|integer|min:1',
+            'is_premium' => 'sometimes|boolean',
+        ]);
+
+        try {
+            DB::beginTransaction();
+
+            $peserta = Peserta::create([
+                'id' => Str::uuid()->toString(),
+                'nama' => $request->nama,
+                'no_ujian' => $request->no_ujian,
+                'password' => $request->password,
+                'jurusan_id' => $request->jurusan_id,
+                'agama_id' => $request->agama_id,
+                'sesi' => $request->sesi,
+                'status' => 1,
+                'block_reason' => null,
+                'antiblock' => false,
+                'is_premium' => $request->boolean('is_premium'),
+                'api_token' => '',
+            ]);
+
+            DB::commit();
+
+            return SendResponse::acceptCustom([
+                'status' => 'success',
+                'data' => $peserta->only('id', 'nama', 'no_ujian', 'sesi', 'is_premium'),
+            ]);
+        } catch (Exception $e) {
+            DB::rollBack();
+
+            return SendResponse::internalServerError('Terjadi kesalahan 500. '.$e->getMessage());
+        }
+    }
+
+    /**
      * @Route(path="api/v2/logedin", methods={"POST"})
      *
      * Login to system

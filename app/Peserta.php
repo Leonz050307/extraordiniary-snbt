@@ -16,6 +16,15 @@ class Peserta extends Model
     protected $guarded = [];
 
     /**
+     * Cast attributes.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'is_premium' => 'boolean',
+    ];
+
+    /**
      * Peserta's agama
      * @return object
      * @author shellrean <wandinak17@gmail.com>
