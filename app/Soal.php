@@ -29,7 +29,7 @@ class Soal extends Model
      * @var [type]
      */
     protected $appends = [
-        'diagram','salah','benar', 'penjawab', 'kosong'
+        'diagram','salah','benar', 'penjawab', 'kosong', 'subtest_label'
     ];
 
     /**
@@ -37,8 +37,23 @@ class Soal extends Model
      * @var [type]
      */
     protected $casts = [
-        'analys'    => 'array'
+        'analys'    => 'array',
+        'subtest'   => 'string',
     ];
+
+    /**
+     * Get human readable subtest label.
+     */
+    public function getSubtestLabelAttribute(): string
+    {
+        $subtests = \App\Models\SnbtSubtest::all();
+
+        if (isset($subtests[$this->subtest])) {
+            return $subtests[$this->subtest]['label'];
+        }
+
+        return $subtests[\App\Models\SnbtSubtest::PENALARAN_UMUM]['label'];
+    }
 
     public function getCreatedAtAttribute()
     {

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\v1;
 
 use App\Http\Controllers\Controller;
+use App\Models\SnbtSubtest;
 use App\Models\SoalConstant;
 use App\Services\ExoProcessHtml;
 use Illuminate\Http\Response;
@@ -37,13 +38,16 @@ class SoalController extends Controller
      */
     public function store(Request $request)
     {
+        $subtestKeys = implode(',', array_keys(SnbtSubtest::all()));
+
         $request->validate([
             'banksoal_id'   => 'required|exists:banksoals,id',
             'correct'       => 'required_if:tipe_soal,1',
             'selected'      => 'required_if:tipe_soal,4|array',
             'pertanyaan'    => 'required',
             'layout'        => 'required',
-            'case_sensitive' => 'required_if:tipe_soal,6'
+            'case_sensitive' => 'required_if:tipe_soal,6',
+            'subtest'       => 'nullable|string|in:'.$subtestKeys,
         ]);
 
         $banksoal = DB::table('banksoals')
@@ -69,7 +73,8 @@ class SoalController extends Controller
                 'rujukan'       => $request->rujukan,
                 'audio'         => $request->audio,
                 'direction'     => $request->direction,
-                'layout'        => $request->layout
+                'layout'        => $request->layout,
+                'subtest'       => $this->resolveSubtest($request->subtest ?? null),
             ];
 
             if (in_array($request->tipe_soal, [SoalConstant::TIPE_BENAR_SALAH, SoalConstant::TIPE_SETUJU_TIDAK])) {
@@ -179,6 +184,7 @@ class SoalController extends Controller
                     'banksoal_id'   => $banksoal->id,
                     'tipe_soal'     => SoalConstant::TIPE_PG,
                     'pertanyaan'    => $soal['pertanyaan'],
+                    'subtest'       => $this->resolveSubtest($soal['subtest'] ?? null),
                     'created_at'    => now(),
                     'updated_at'    => now()
                 ];
@@ -246,7 +252,8 @@ class SoalController extends Controller
                             'banksoal_id'   => $request->banksoal_id,
                             'pertanyaan'    => trim(preg_replace('/\s+/', ' ', $value['soal'])),
                             'tipe_soal'     => $request->tipe_soal,
-                            'rujukan'       => ''
+                            'rujukan'       => '',
+                            'subtest'       => $this->resolveSubtest($request->subtest ?? null),
                         ]);
 
                         $label_mark = "A";
@@ -284,7 +291,8 @@ class SoalController extends Controller
                             'banksoal_id'   => $request->banksoal_id,
                             'pertanyaan'    => trim(preg_replace('/\s+/', ' ', $value['soal'])),
                             'tipe_soal'     => $request->tipe_soal,
-                            'rujukan'       => ''
+                            'rujukan'       => '',
+                            'subtest'       => $this->resolveSubtest($request->subtest ?? null),
                         ]);
 
                         DB::commit();
@@ -339,13 +347,16 @@ class SoalController extends Controller
      */
     public function update(Request $request, Soal $soal)
     {
+        $subtestKeys = implode(',', array_keys(SnbtSubtest::all()));
+
         $request->validate([
             'banksoal_id'   => 'required|exists:banksoals,id',
             'correct'       => 'required_if:tipe_soal,1',
             'selected'      => 'required_if:tipe_soal,4|array',
             'pertanyaan'    => 'required',
             'layout'        => 'required',
-            'case_sensitive' => 'required_if:tipe_soal,6'
+            'case_sensitive' => 'required_if:tipe_soal,6',
+            'subtest'       => 'nullable|string|in:'.$subtestKeys,
         ]);
 
         $banksoal = DB::table('banksoals')
@@ -379,6 +390,7 @@ class SoalController extends Controller
             $soal->direction = $request->direction;
             $soal->tipe_soal = $request->tipe_soal;
             $soal->rujukan = $request->rujukan;
+            $soal->subtest = $this->resolveSubtest($request->subtest ?? null);
 
             if (isset($request->case_sensitive)) {
                 $soal->case_sensitive = $request->case_sensitive;
@@ -951,5 +963,14 @@ class SoalController extends Controller
         }
 
         return SendResponse::accept();
+    }
+
+    private function resolveSubtest(?string $subtest): string
+    {
+        if ($subtest && SnbtSubtest::isValid($subtest)) {
+            return $subtest;
+        }
+
+        return SnbtSubtest::PENALARAN_UMUM;
     }
 }
