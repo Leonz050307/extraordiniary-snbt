@@ -20,4 +20,10 @@ Route::middleware(['basicAuth'])->group(function () {
     Route::get('/system-administration-exo-cbt/check-update', 'System\SystemController@checkUpdate')->name('system.exo.check.update');
 });
 
+// Public peserta register page (styled like login)
+Route::get('/register', function () {
+    return view('peserta_register');
+});
+
+// fallback to SPA ujian view
 Route::view('/{any}', 'ujian')->where('any','.*');

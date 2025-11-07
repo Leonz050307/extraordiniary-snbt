@@ -26,6 +26,8 @@ Route::namespace('Api\v2')->group(function() {
         Route::post('ujian','UjianController@store');
         Route::post('ujian/ragu-ragu', 'UjianController@setRagu');
         Route::get('ujian/selesai', 'UjianController@selesai');
+    // peserta hanya dapat melihat detail jawaban mereka sendiri
+    Route::get('ujians/{jadwal}/hasil/{hasil}', 'UjianAktifController@hasilUjianDetail');
         Route::post('ujians/leave-counter', 'UjianAktifController@leaveCounter');
         Route::post('ujians/block-me-please', 'UjianAktifController@blockMePlease');
     });

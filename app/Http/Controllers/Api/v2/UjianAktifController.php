@@ -518,13 +518,15 @@ class UjianAktifController extends Controller
             return SendResponse::acceptData([]);
         }
 
-        # Ambil hasil ujian siswa
+        # Ambil hasil ujian siswa (tambahkan id supaya peserta bisa lihat detail jawaban mereka)
         $hasil = DB::table('hasil_ujians')
             ->whereIn('hasil_ujians.jadwal_id', $viewable)
             ->where('hasil_ujians.peserta_id', $peserta->id)
             ->join('jadwals', 'jadwals.id', '=', 'hasil_ujians.jadwal_id')
             ->select([
                 'jadwals.alias',
+                'jadwals.id as jadwal_id',
+                'hasil_ujians.id as hasil_id',
                 'hasil_ujians.point_esay',
                 'hasil_ujians.point_setuju_tidak',
                 'hasil_ujians.hasil as result'
@@ -532,9 +534,18 @@ class UjianAktifController extends Controller
             ->get();
 
         $hasil = $hasil->map(function($item) {
+            $score = $item->point_esay + $item->point_setuju_tidak + $item->result;
             return [
                 'alias' => $item->alias,
-                'hasil' => $item->point_esay + $item->point_setuju_tidak + $item->result
+                'hasil' => $score,
+                // ids for client-side link
+                'jadwal_id' => $item->jadwal_id,
+                'hasil_id' => $item->hasil_id,
+                // convenient URLs (client may use these)
+                    'view_api' => url('/api/v2/ujians/'.$item->jadwal_id.'/hasil/'.$item->hasil_id),
+                    'view_page' => url('/result/'.$item->jadwal_id.'/'.$item->hasil_id),
+                    // WhatsApp prefilled link untuk permintaan pembahasan
+                    'wa_link' => 'https://wa.me/6287874138999?text='.rawurlencode('Kak saya mau pembahasan soal')
             ];
         });
 
@@ -613,5 +624,47 @@ class UjianAktifController extends Controller
                 'block_reason' => $request->reason
             ]);
         }
+    }
+
+    /**
+     * @Route(path="api/v2/ujians/{jadwal}/hasil/{hasil}", methods={"GET"})
+     *
+     * Ambil data hasil ujian peserta detail dengan jawabannya (peserta hanya boleh melihat miliknya saja)
+     *
+     * @param string $jadwal_id
+     * @param string $hasil_id
+     * @return Response
+     * @author shellrean <wandinak17@gmail.com>
+     */
+    public function hasilUjianDetail($jadwal_id, $hasil_id)
+    {
+        $peserta = request()->get('peserta-auth');
+
+        $hasil = DB::table('hasil_ujians')
+            ->where('id', $hasil_id)
+            ->where('jadwal_id', $jadwal_id)
+            ->select('peserta_id', 'jadwal_id')
+            ->first();
+
+        if (!$hasil) {
+            return SendResponse::badRequest('kesalahan, data yang diminta tidak dapat ditemukan');
+        }
+
+        // pastikan peserta hanya dapat melihat hasilnya sendiri
+        if ($hasil->peserta_id !== $peserta->id) {
+            return SendResponse::badRequest('Anda tidak berhak melihat jawaban peserta lain');
+        }
+
+        $jawaban = \App\JawabanPeserta::with(['peserta' => function($query) {
+            $query->select('id','nama','no_ujian');
+        },'esay_result','soal','soal.jawabans'])
+        ->where([
+            'peserta_id'    => $hasil->peserta_id,
+            'jadwal_id'     => $hasil->jadwal_id
+        ])
+        ->get();
+
+        $data = $jawaban->map([\App\Models\dto\ResultDataTransform::class, 'resultUjianDetail']);
+        return SendResponse::acceptData($data);
     }
 }

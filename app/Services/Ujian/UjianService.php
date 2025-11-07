@@ -535,14 +535,66 @@ final class UjianService extends AbstractService
                 }
             }
 
-            # Resulting Score
+            # Resulting Score (rarity-based per-soal weighting)
+            # Hitung soal yang dipakai pada jadwal+banksoal -> attempts and corrects
+            // exclude current peserta when computing global attempts/corrects
+            $perSoalStats = DB::table('jawaban_pesertas')
+                ->where('jadwal_id', $jadwal_id)
+                ->where('banksoal_id', $banksoal_id)
+                ->where('peserta_id', '<>', $peserta_id)
+                ->groupBy('soal_id')
+                ->select([
+                    'soal_id',
+                    DB::raw('COUNT(*) as attempts'),
+                    DB::raw('SUM(CASE WHEN iscorrect = 1 THEN 1 ELSE 0 END) as corrects')
+                ])
+                ->get();
+
+            $weights = [];
+            $sumWeights = 0.0;
+            foreach ($perSoalStats as $s) {
+                $attempts = intval($s->attempts);
+                $corrects = intval($s->corrects);
+                if ($attempts > 0) {
+                    $w = 1 - ($corrects / $attempts); // rarer-correct => higher weight
+                    if ($w < 0) $w = 0; // safety
+                } else {
+                    $w = 1; // if no attempts, give max weight
+                }
+                $weights[$s->soal_id] = $w;
+                $sumWeights += $w;
+            }
+
+            // participant raw score = sum weights of soal they answered correctly
+            $participantCorrectSoals = JawabanPeserta::where([
+                'jadwal_id' => $jadwal_id,
+                'banksoal_id' => $banksoal_id,
+                'peserta_id' => $peserta_id,
+                'iscorrect' => 1
+            ])->pluck('soal_id')->toArray();
+
+            $raw = 0.0;
+            foreach ($participantCorrectSoals as $sid) {
+                if (isset($weights[$sid])) {
+                    $raw += $weights[$sid];
+                }
+            }
+
+            // normalize to 0..1000
+            if ($sumWeights > 0) {
+                $normalized = ($raw / $sumWeights) * 1000.0;
+            } else {
+                $normalized = 0.0;
+            }
+
+            // round and clamp
+            $hasil = (float) max(0, min(1000, round($normalized, 2)));
+
             $null = JawabanPeserta::where([
                 'jawab'         => 0,
                 'jadwal_id'     => $jadwal_id,
                 'peserta_id'    => $peserta_id,
             ])->where('answered', false)->count();
-
-            $hasil = $hasil_pg+$hasil_listening+$hasil_mpg+$hasil_isiang_singkat+$hasil_menjodohkan+$hasil_mengurutkan+$hasil_benar_salah;
 
             DB::table('hasil_ujians')->insert([
                 'id'                            => Str::uuid()->toString(),
