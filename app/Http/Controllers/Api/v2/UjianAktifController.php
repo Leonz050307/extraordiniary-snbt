@@ -579,6 +579,15 @@ class UjianAktifController extends Controller
             return SendResponse::badRequest('Hasil ujian belum tersedia untuk jadwal ini.');
         }
 
+        $jadwal = DB::table('jadwals')
+            ->select(['id', 'view_result'])
+            ->where('id', $jadwalId)
+            ->first();
+
+        if (!$jadwal || (int)$jadwal->view_result !== 1) {
+            return SendResponse::badRequest('Review untuk jadwal ini tidak tersedia.');
+        }
+
         $jawaban = JawabanPeserta::with(['soal.jawabans' => function ($query) {
                 $query->orderBy('created_at');
             }])
